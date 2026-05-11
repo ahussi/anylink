@@ -1,60 +1,65 @@
-// AnyLink 是一个企业级远程办公vpn软件，可以支持多人同时在线使用。
-
-//go:build !windows
-// +build !windows
-
 package main
 
 import (
-	"embed"
+	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/bjdgyc/anylink/admin"
 	"github.com/bjdgyc/anylink/base"
+	"github.com/bjdgyc/anylink/dbdata"
 	"github.com/bjdgyc/anylink/handler"
 )
 
-//go:embed ui
-var uiData embed.FS
-
-// 程序版本
 var (
-	appVer    string
-	commitId  string
-	buildDate string
+	version   = "dev"
+	commit    = "none"
+	date      = "unknown"
+	builtBy   = "unknown"
 )
 
 func main() {
-	admin.UiData = uiData
-	base.APP_VER = appVer
-	base.CommitId = commitId
-	base.BuildDate = buildDate
+	// Parse command-line flags
+	configFile := flag.String("conf", "conf/server.toml", "config file path")
+	showVersion := flag.Bool("version", false, "show version information")
+	flag.Parse()
 
-	base.Start()
-	handler.Start()
-
-	signalWatch()
-}
-
-func signalWatch() {
-	base.Info("Server pid: ", os.Getpid())
-
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGALRM, syscall.SIGUSR2)
-	for {
-		sig := <-sigs
-		base.Info("Get signal:", sig)
-		switch sig {
-		case syscall.SIGUSR2:
-			// reload
-			base.Info("Reload")
-		default:
-			// stop
-			base.Info("Stop")
-			handler.Stop()
-			return
-		}
+	if *showVersion {
+		fmt.Printf("anylink version %s, commit %s, built at %s by %s\n",
+			version, commit, date, builtBy)
+		os.Exit(0)
 	}
+
+	// Initialize base configuration
+	if err := base.InitConfig(*configFile); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize config: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize logger
+	base.InitLog()
+	base.Logger.Infof("Starting anylink server %s (commit: %s)", version, commit)
+
+	// Initialize database
+	if err := dbdata.InitDB(); err != nil {
+		base.Logger.Fatalf("failed to initialize database: %v", err)
+	}
+	defer dbdata.CloseDB()
+
+	// Initialize and start the VPN handler
+	if err := handler.Start(); err != nil {
+		base.Logger.Fatalf("failed to start handler: %v", err)
+	}
+
+	// Wait for termination signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+
+	base.Logger.Infof("Received signal %s, shutting down...", sig)
+
+	// Graceful shutdown
+	handler.Stop()
+	base.Logger.Info("anylink server stopped")
 }
