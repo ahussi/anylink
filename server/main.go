@@ -13,10 +13,10 @@ import (
 )
 
 var (
-	version   = "dev"
-	commit    = "none"
-	date      = "unknown"
-	builtBy   = "unknown"
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+	builtBy = "unknown"
 )
 
 func main() {
@@ -53,8 +53,9 @@ func main() {
 	}
 
 	// Wait for termination signal
+	// Also handle SIGHUP so the process can be cleanly stopped by some init systems
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	sig := <-quit
 
 	base.Logger.Infof("Received signal %s, shutting down...", sig)
